@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Painel do Bar</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #eee; }
+    .novo { background: #d1f7c4; }
+    .preparo { background: #ffe6a7; }
+    .entregue { background: #c7dbff; }
+    button { padding: 8px 10px; border: 0; border-radius: 8px; background: #111; color: #fff; cursor: pointer; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Painel de Pedidos</h1>
+    <div>
+      <button id="permBtn">Ativar notificações</button>
+    </div>
+  </header>
+
+  <audio id="ding">
+    <source src="data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQAA" type="audio/mpeg">
+  </audio>
+
+  <div class="grid" id="list"></div>
+
+  <script>
+    const list = document.getElementById('list');
+    const ding = document.getElementById('ding');
+
+    function fmtDate(iso){
+      const d = new Date(iso);
+      return d.toLocaleString();
+    }
+
+    function statusClass(s){
+      if (s === 'novo') return 'novo';
+      if (s === 'preparo') return 'preparo';
+      return 'entregue';
+    }
+
+    function cardHtml(o){
+      return `
+        <div class="card" id="card-${o.id}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <strong>Mesa ${o.table}</strong>
+            <span class="tag ${statusClass(o.status)}">${o.status}</span>
+          </div>
+          <div style="margin-top:8px; white-space:pre-wrap">${o.items}</div>
+          ${o.notes ? `<div style=\"margin-top:6px;color:#555\">Obs: ${o.notes}</div>` : ''}
+          <div style="font-size:12px;color:#666;margin-top:6px;">${fmtDate(o.createdAt)}</div>
+          <div style="display:flex; gap:8px; margin-top:10px;">
+            <button onclick="setStatus('${o.id}','preparo')">Em preparo</button>
+            <button onclick="setStatus('${o.id}','entregue')">Entregue</button>
+          </div>
+        </div>`;
+    }
+
+    async function load(){
+      try{
+        const res = await fetch('/api/orders');
+        if(!res.ok) throw new Error();
+        const data = await res.json();
+        list.innerHTML = data.map(cardHtml).join('');
+      }catch{}
+    }
+
+    async function setStatus(id, status){
+      try{
+        const res = await fetch(`/api/orders/${id}`,{ method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status}) });
+        if(!res.ok) throw new Error();
+      }catch{}
+    }
+
+    function notify(order){
+      try{
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification(`Novo pedido • Mesa ${order.table}`, { body: order.items, tag: order.id });
+        }
+        ding.currentTime = 0; ding.play();
+      }catch{}
+    }
+
+    document.getElementById('permBtn').onclick = async () => {
+      if (typeof Notification !== 'undefined') {
+        const perm = await Notification.requestPermission();
+        alert(perm === 'granted' ? 'Notificações ativadas' : 'Permissão negada');
+      } else {
+        alert('Sem suporte a Notification API');
+      }
+    };
+
+    const socket = io();
+    socket.on('new-order', (order) => {
+      list.insertAdjacentHTML('afterbegin', cardHtml(order));
+      notify(order);
+    });
+    socket.on('order-updated', (order) => {
+      const el = document.getElementById(`card-${order.id}`);
+      if (el) el.outerHTML = cardHtml(order);
+    });
+
+    load();
+  </script>
+</body>
+</html>
+ 
